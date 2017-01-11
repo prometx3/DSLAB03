@@ -27,7 +27,6 @@ public class ClientServer extends Thread
      */
     public void run()
     {
-    	//System.out.println("ClientServerThread is running!");       
     	try {
 			getConnections();
 		} catch (IOException e) {

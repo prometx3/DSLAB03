@@ -7,6 +7,10 @@ import java.net.DatagramSocket;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
+import java.rmi.NotBoundException;
+import java.rmi.RemoteException;
+import java.rmi.registry.LocateRegistry;
+import java.rmi.registry.Registry;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -16,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 
 import cli.Command;
 import cli.Shell;
+import nameserver.INameserverForChatserver;
 import util.Config;
 
 public class Chatserver implements IChatserverCli, Runnable {
@@ -33,10 +38,11 @@ public class Chatserver implements IChatserverCli, Runnable {
 	// udp socket
 	private DatagramSocket serverUDPSocket;
 	private UDPListener udpListener;
-	
+
 	private boolean shutdown = false;
-	//threading
+	// threading
 	private ExecutorService executor;
+	private INameserverForChatserver nameserver;
 
 	/**
 	 * @param componentName
@@ -48,8 +54,8 @@ public class Chatserver implements IChatserverCli, Runnable {
 	 * @param userResponseStream
 	 *            the output stream to write the console output to
 	 */
-	public Chatserver(String componentName, Config config,
-			InputStream userRequestStream, PrintStream userResponseStream) {
+	public Chatserver(String componentName, Config config, InputStream userRequestStream,
+			PrintStream userResponseStream) {
 		this.componentName = componentName;
 		this.config = config;
 		this.userRequestStream = userRequestStream;
@@ -68,92 +74,91 @@ public class Chatserver implements IChatserverCli, Runnable {
 		shell.register(this);
 
 		Config conf = new Config("user");
-		dispatcher = new ServerDispatcher(conf);
-		
+
+		try {
+			Registry registry = LocateRegistry.getRegistry(config.getString("registry.host"), config.getInt("registry.port"));
+			nameserver = (INameserverForChatserver) registry.lookup(config.getString("root_id"));
+
+			dispatcher = new ServerDispatcher(conf, nameserver);
+		} catch (RemoteException e) {
+			throw new RuntimeException(
+					"Error while obtaining registry/server-remote-object.", e);
+		} catch (NotBoundException e) {
+			throw new RuntimeException(
+					"Error while looking for server-remote-object.", e);
+		}
 		executor = Executors.newCachedThreadPool();
 	}
 
 	@Override
 	public void run() {
-		//System.out.println("Log: Running server!");
 		Thread.currentThread().setName("chatserver");
 		// TODO
 		new Thread(shell).start();
-		System.out.println(getClass().getName()
-				+ " up and waiting for commands!");
+		this.userResponseStream.println(getClass().getName() + " up and waiting for commands!");
 
 		// setting up server sockets and waiting for connections
 		try {
 			serverSocket = new ServerSocket(config.getInt("tcp.port"));
 			serverUDPSocket = new DatagramSocket(config.getInt("udp.port"));
-			udpListener = new UDPListener(serverUDPSocket,dispatcher,shell);
+			udpListener = new UDPListener(serverUDPSocket, dispatcher, shell);
 			udpListener.start();
+
 			// handle incoming connections from clients
 			getConnections();
 		} catch (IOException e) {
-			System.out.println(getClass().getName()
-					+ ": " + e);
+			this.userResponseStream.println(getClass().getName() + ": " + e);
 		}
 	}
 
 	public void getConnections() throws IOException {
-		
-			while (!shutdown) {
-				if(Thread.currentThread().isInterrupted())
-				{
-					shell.writeLine("Thread interrupted!");
-					break;
-				}
-				try {
-					Socket socket = serverSocket.accept();
-					ClientInfo clientInfo = new ClientInfo();
-					clientInfo.mSocket = socket;
-					ClientListener clientListener = new ClientListener(
-							clientInfo, dispatcher);
-					ClientSender clientSender = new ClientSender(clientInfo,
-							dispatcher);
-					clientInfo.mClientListener = clientListener;
-					clientInfo.mClientSender = clientSender;
-					// clientListener.start();
-					executor.execute(clientListener);
-					dispatcher.addClient(clientInfo);
-				} 
-				catch(SocketException e)
-				{
-					//could be thrown because exit closes the socket
-					shell.writeLine(e.getMessage());
-					shutdown = true;
-					return;
-				}
-				catch (IOException ioe) {
-					shell.writeLine(ioe.getMessage());
-					shutdown = true;
-					serverSocket.close();
-					return;
-				}
-				
+
+		while (!shutdown) {
+			if (Thread.currentThread().isInterrupted()) {
+				shell.writeLine("Thread interrupted!");
+				break;
+			}
+			try {
+				Socket socket = serverSocket.accept();
+				ClientInfo clientInfo = new ClientInfo();
+				clientInfo.mSocket = socket;
+				ClientListener clientListener = new ClientListener(clientInfo, dispatcher, nameserver);
+				ClientSender clientSender = new ClientSender(clientInfo, dispatcher);
+				clientInfo.mClientListener = clientListener;
+				clientInfo.mClientSender = clientSender;
+				// clientListener.start();
+				executor.execute(clientListener);
+				dispatcher.addClient(clientInfo);
+			} catch (SocketException e) {
+				// could be thrown because exit closes the socket
+				shell.writeLine(e.getMessage());
+				shutdown = true;
+				return;
+			} catch (IOException ioe) {
+				shell.writeLine(ioe.getMessage());
+				shutdown = true;
+				serverSocket.close();
+				return;
 			}
 
-		
+		}
+
 	}
 
 	@Override
 	@Command
 	public String users() throws IOException {
-		
+
 		List<ClientInfo> clients = dispatcher.getClients();
 		List<String> users = new ArrayList<>();
-		for(ClientInfo ci:clients)
-		{
-			if(ci.loggedIn)
-			{
+		for (ClientInfo ci : clients) {
+			if (ci.loggedIn) {
 				users.add(ci.userName + " online");
 			}
-			
+
 		}
 		Collections.sort(users);
-		for(String s:users)
-		{
+		for (String s : users) {
 			shell.writeLine(s);
 		}
 		return null;
@@ -167,17 +172,17 @@ public class Chatserver implements IChatserverCli, Runnable {
 		this.udpListener.close();
 		this.shutdown = true;
 		this.serverSocket.close();
-		
+
 		executor.shutdown();
 		try {
-		    if (!executor.awaitTermination(800, TimeUnit.MILLISECONDS)) {
-		    	executor.shutdownNow();
-		    } 
+			if (!executor.awaitTermination(800, TimeUnit.MILLISECONDS)) {
+				executor.shutdownNow();
+			}
 		} catch (InterruptedException e) {
 			executor.shutdownNow();
 		}
-		//also close the shell
-		shell.close();		
+		// also close the shell
+		shell.close();
 		return null;
 	}
 
@@ -187,8 +192,7 @@ public class Chatserver implements IChatserverCli, Runnable {
 	 *            component
 	 */
 	public static void main(String[] args) {
-		Chatserver chatserver = new Chatserver(args[0],
-				new Config("chatserver"), System.in, System.out);
+		Chatserver chatserver = new Chatserver(args[0], new Config("chatserver"), System.in, System.out);
 		// TODO: start the chatserver
 		new Thread((Runnable) chatserver).start();
 	}

@@ -19,8 +19,9 @@ import java.util.concurrent.BlockingQueue;
 import util.Config;
 import cli.Command;
 import cli.Shell;
+import nameserver.INameserverCli;
 
-public class Client implements IClientCli, Runnable {
+public class Client implements IClientCli, Runnable, INameserverCli {
 
 	private String componentName;
 	private Config config;
@@ -89,14 +90,14 @@ public class Client implements IClientCli, Runnable {
 			clientCommunicator.start();
 			
 			
-			System.out.println(getClass().getName()
+			this.userResponseStream.println(getClass().getName()
 					+ " up and waiting for commands!");
 			
 			//in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 			
 			
 		} catch (Exception e) {
-			System.out.println(e.getMessage());
+			this.userResponseStream.println(e.getMessage());
 			System.exit(-1);
 		}
 		
@@ -319,7 +320,6 @@ public class Client implements IClientCli, Runnable {
 	{
 		try {
 			shell.writeLine(msg);
-			//System.out.println(msg);
 		} catch (Exception e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -388,6 +388,20 @@ public class Client implements IClientCli, Runnable {
 
 	@Override
 	public String authenticate(String username) throws IOException {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+	@Override
+	@Command
+	public String nameservers() throws IOException {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+	@Override
+	@Command
+	public String addresses() throws IOException {
 		// TODO Auto-generated method stub
 		return null;
 	}
