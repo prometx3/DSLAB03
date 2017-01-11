@@ -40,6 +40,7 @@ public class Nameserver implements INameserverCli, Runnable {
 	private String domain;
 
 	private Registry registry;
+	private INameserver exportObject;
 
 	private NameserverList servers = new NameserverList();
 	private UserInfoList userInfos = new UserInfoList();
@@ -74,10 +75,9 @@ public class Nameserver implements INameserverCli, Runnable {
 		new Thread(this.shell).start();
 
 		this.domain = config.listKeys().contains("domain") ? config.getString("domain") : "";
-
+		this.exportObject = new NameserverRemote(this.domain, this.servers, this.userInfos);
 		try {
-			this.remoteObject = (INameserver) UnicastRemoteObject
-					.exportObject(new NameserverRemote(this.domain, this.servers, this.userInfos), 0);
+			this.remoteObject = (INameserver) UnicastRemoteObject.exportObject(this.exportObject, 0);
 			if (!this.config.listKeys().contains("domain")) {
 				this.registry = LocateRegistry.createRegistry(config.getInt("registry.port"));
 				this.registry.bind(config.getString("root_id"), this.remoteObject);
@@ -87,7 +87,6 @@ public class Nameserver implements INameserverCli, Runnable {
 						config.getInt("registry.port"));
 
 				INameserver root = (INameserver) this.registry.lookup(config.getString("root_id"));
-
 
 				String[] reversed = domain.split("\\.");
 				if (reversed.length > 1) {
@@ -119,7 +118,7 @@ public class Nameserver implements INameserverCli, Runnable {
 			try {
 				Thread.sleep(1000);
 			} catch (InterruptedException e) {
-				//Cannot be handled!
+				// Cannot be handled!
 			}
 		}
 	}
@@ -132,8 +131,7 @@ public class Nameserver implements INameserverCli, Runnable {
 		this.exit = true;
 
 		try {
-			// unexport the previously exported remote object
-			UnicastRemoteObject.unexportObject(this.remoteObject, true);
+			UnicastRemoteObject.unexportObject(this.exportObject, true);
 		} catch (NoSuchObjectException e) {
 			System.err.println("Error while unexporting object: " + e.getMessage());
 		}
