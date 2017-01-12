@@ -49,6 +49,9 @@ public class ClientServer extends Thread
 				ClientListener cl = new ClientListener(socket,client);
 				cl.start();
 				listener.add(cl);
+			} catch(SocketException e)
+			{
+				//do nothing
 			} catch (IOException ioe) {
 				ioe.printStackTrace();
 			}

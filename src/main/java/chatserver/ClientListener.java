@@ -3,6 +3,7 @@ package chatserver;
 import java.io.*;
 import java.net.*;
 import java.nio.charset.Charset;
+import java.rmi.RemoteException;
 import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
@@ -12,6 +13,9 @@ import java.util.Arrays;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 
+import nameserver.INameserverForChatserver;
+import nameserver.exceptions.AlreadyRegisteredException;
+import nameserver.exceptions.InvalidDomainException;
 import security.AESChannel;
 import security.EncryptionException;
 import security.RSAChannel;
@@ -201,7 +205,7 @@ public class ClientListener extends Thread
 				}
 				mClientInfo.mClientSender.sendMessage(response);
 				break;
-´
+
 			}		
 			
 
@@ -244,11 +248,19 @@ public class ClientListener extends Thread
 			//load the public key for the given username -> if the key cant be loaded -> print error	
 			PublicKey pubUserKey = null;
 			String username = parts[1];
+			
 			try {
 				pubUserKey = Keys.readPublicPEM(new File(conf.getString("keys.dir") + "/" + username + ".pub.pem"));
 			} catch (IOException e1) {
 				//TODO: send response to user 
 				System.out.println(e1.getMessage());
+				return false;
+			}
+			if(this.mServerDispatcher.alreadyLoggedIn(username))
+			{
+				//already logged in -> 
+				SecureChannel secChannel =  new RSAChannel(new Base64Channel(new BasicTCPChannel(mClientInfo.mSocket)),pubUserKey,privateKey);
+				secChannel.sendMessage("!fail Already logged in!".getBytes(Charset.forName("UTF-8")));
 				return false;
 			}
 			//the reponse syntac is !ok <client-challenge> <chatserver-challenge> <secret-key> <iv-parameter>

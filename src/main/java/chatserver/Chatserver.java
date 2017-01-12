@@ -8,15 +8,15 @@ import java.net.DatagramSocket;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
-<<<<<<< HEAD
+
 import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
-=======
+
 import java.security.PrivateKey;
 import java.security.Security;
->>>>>>> stage2_dev
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -170,7 +170,7 @@ public class Chatserver implements IChatserverCli, Runnable {
 
 		}
 
-	}
+	
 
 	@Override
 	@Command

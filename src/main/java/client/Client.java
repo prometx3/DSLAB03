@@ -363,8 +363,9 @@ public class Client implements IClientCli, Runnable, INameserverCli {
 	 * sends one tcp message to the given host(and port)
 	 * @param host
 	 * @param port
+	 * @throws IOException 
 	 */
-	public void sendTCPMessage(String host,int port, String msg)
+	public void sendTCPMessage(String host,int port, String msg) throws IOException
 	{		
 		try {
 			Socket tcpSock = new Socket(host,port);
@@ -376,10 +377,10 @@ public class Client implements IClientCli, Runnable, INameserverCli {
 			
 		} catch (UnknownHostException e) {
 			// TODO Auto-generated catch block
-			e.printStackTrace();
+			shell.writeLine(e.getMessage());
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
-			e.printStackTrace();
+			shell.writeLine(e.getMessage());
 		}
 	}
 	
@@ -503,7 +504,12 @@ public class Client implements IClientCli, Runnable, INameserverCli {
 							this.clientCommunicator.send(split[2]);
 						}
 					}
-				}
+					else if(split[0].equals("!fail"))
+					{
+						shell.writeLine(arrayToString(split,1));
+						return null;
+					}
+				}				
 				else
 				{
 					//something went wrong, did not get the ok from server
