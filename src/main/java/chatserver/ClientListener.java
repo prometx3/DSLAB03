@@ -2,7 +2,24 @@ package chatserver;
 
 import java.io.*;
 import java.net.*;
+import java.nio.charset.Charset;
+import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.SecureRandom;
 import java.util.Arrays;
+
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+
+import security.AESChannel;
+import security.EncryptionException;
+import security.RSAChannel;
+import security.SecureChannel;
+import security.Base64Channel;
+import security.BasicTCPChannel;
+import util.Config;
+import util.Keys;
  
 public class ClientListener extends Thread
 {
@@ -10,14 +27,29 @@ public class ClientListener extends Thread
     private ClientInfo mClientInfo;
     private BufferedReader mIn;  
     private boolean shutdown = false;
- 
-    public ClientListener(ClientInfo aClientInfo, ServerDispatcher aServerDispatcher)
+    //encryption
+    private boolean RSA = true;
+    private SecureChannel secureChannel;
+    private PrivateKey privateKey;
+    
+    private Config conf;
+    
+    public ClientListener(ClientInfo aClientInfo, ServerDispatcher aServerDispatcher, PrivateKey privateKey, Config conf)
     throws IOException
     {
-        mClientInfo = aClientInfo;
-        mServerDispatcher = aServerDispatcher;
+        this.mClientInfo = aClientInfo;
+        this.mServerDispatcher = aServerDispatcher;
+        this.privateKey = privateKey;
+        this.conf = conf;
         Socket socket = aClientInfo.mSocket;
-        mIn = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+        
+      //  mIn = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+        //first 2 messages exchanged between sever and client must be RSA encrypted so we can set the channel to RSA
+        try {
+			this.secureChannel = new RSAChannel(new Base64Channel(new BasicTCPChannel(socket)),privateKey);
+		} catch (EncryptionException e) {			
+			System.out.println(e.getMessage());
+		}      
     }
  
     /**
@@ -27,22 +59,30 @@ public class ClientListener extends Thread
     {    	
     	Thread.currentThread().setName("ClientListener");
         try {
-           while (!Thread.currentThread().isInterrupted() && !shutdown) {
-               String message = mIn.readLine();
-               if (message == null)
-                   break;
-               
-               //process message from client
-               parseMessage(message);              
-           }
+			if (handleHandshake()) {
+				//if the handshake was handled correctly -> messages will be send over the secure AES channel
+				while (!Thread.currentThread().isInterrupted() && !shutdown) {
+					// String message = mIn.readLine();
+					// receiving message through secure channel
+					String message = this.secureChannel.receiveMessage();
+					if (message == null)
+						break;
+
+					// process message from client
+					parseMessage(message);
+				}
+			}
         } catch (IOException ioex) {
            // Problem reading from socket (communication is broken)
         	System.out.println(ioex.getMessage());        	
         	shutdown = true;        	
-        }
+        } catch (EncryptionException e) {
+        	System.out.println(e.getMessage());        	
+        	shutdown = true;        	
+		}
         try {
         	 this.shutdown = true;
-			 this.mIn.close();
+			 //this.mIn.close();
 			 this.mClientInfo.mSocket.close();
 		} catch (IOException e) {			
 			e.printStackTrace();
@@ -61,7 +101,7 @@ public class ClientListener extends Thread
 			switch (command) {
 			
 			case "!login": {
-				String response = "!!login Wrong username or password.";
+				/*String response = "!!login Wrong username or password.";
 				if (mClientInfo.loggedIn || mServerDispatcher.alreadyLoggedIn(parts[1])) {
 					// already logged in, either this client oder another client with the same name
 					// has already logged in -> dont allow double logged in users
@@ -84,7 +124,7 @@ public class ClientListener extends Thread
 				Thread.currentThread();
 				
 				mClientInfo.mClientSender.sendMessage(response);
-				break;
+				*/break;
 
 			}			
 			case "!send":
@@ -142,8 +182,7 @@ public class ClientListener extends Thread
 				}
 				mClientInfo.mClientSender.sendMessage(response);
 				break;
-			}
-			
+			}		
 			
 			}
 		}
@@ -159,6 +198,14 @@ public class ClientListener extends Thread
 					mClientInfo.loggedIn = false;
 					mClientInfo.userName = "";
 					response = "!logout Successfully logged out.";
+					//reset secure channel to accept RSA encrypted messages 
+					try {
+						this.secureChannel = new RSAChannel(new Base64Channel(
+								new BasicTCPChannel(mClientInfo.mSocket)),
+								privateKey);
+					} catch (Exception e) {
+						System.out.println(e.getMessage());
+					} 
 				}
 				mClientInfo.mClientSender.sendMessage(response);
 				break;
@@ -166,6 +213,76 @@ public class ClientListener extends Thread
 			}
 		}
     	
+    }
+    private boolean handleHandshake() throws IOException, EncryptionException
+    {
+    	// receiving message through secure channel
+		String message = this.secureChannel.receiveMessage();
+		String[] parts = message.split("\\s");
+		if(parts.length > 2)
+		{
+			//load the public key for the given username -> if the key cant be loaded -> print error	
+			PublicKey pubUserKey = null;
+			String username = parts[1];
+			try {
+				pubUserKey = Keys.readPublicPEM(new File(conf.getString("keys.dir") + "/" + username + ".pub.pem"));
+			} catch (IOException e1) {
+				//TODO: send response to user 
+				System.out.println(e1.getMessage());
+				return false;
+			}
+			//the reponse syntac is !ok <client-challenge> <chatserver-challenge> <secret-key> <iv-parameter>
+			String response = "!ok " + parts[2];
+			// generates a 32 byte secure random number as chatserver challenge
+			SecureRandom secureRandom = new SecureRandom();
+			final byte[] chatserverChallenge = new byte[32];
+			secureRandom.nextBytes(chatserverChallenge);
+			
+			// generate the IV parameter
+			final byte[] ivParameter = new byte[16];
+			secureRandom.nextBytes(ivParameter);
+			
+			//generate the secret key
+			KeyGenerator generator;
+			try {
+				generator = KeyGenerator.getInstance("AES");
+				// KEYSIZE is in bits
+				generator.init(256);
+				SecretKey key = generator.generateKey();
+				
+				String chatserverChallengeB64 = Base64Channel.encodeBase64(chatserverChallenge);
+				String secretKey = Base64Channel.encodeBase64(key.getEncoded());
+				String ivParam = Base64Channel.encodeBase64(ivParameter);
+				response += " " + chatserverChallengeB64 + " " + secretKey + " " + ivParam;					
+				
+				//send the whole response string back to the client, encrypted with the clients public key and RSA
+				SecureChannel secChannel =  new RSAChannel(new Base64Channel(new BasicTCPChannel(mClientInfo.mSocket)),pubUserKey,privateKey);
+				secChannel.sendMessage(response.getBytes(Charset.forName("UTF-8")));
+				//not switch to AES -> next message should be AES encoded and should just be the server challenge
+				secChannel = new AESChannel(new Base64Channel(new BasicTCPChannel(mClientInfo.mSocket)),secretKey,ivParam);
+				String clientResponse = secChannel.receiveMessage();
+				if(clientResponse.equals(chatserverChallengeB64))
+				{
+					//everything worked fine -> the communication between client and server should now be done over the AES channel
+					this.secureChannel = secChannel;
+					mClientInfo.mClientSender.setSecureChannel(secureChannel);
+					//login user
+					// set clientinfo loggedIn to true -> user is loggedIn
+					mClientInfo.loggedIn = true;
+					// set username
+					mClientInfo.userName = username;
+					System.out.println("AES Encryption Channel should be established!");
+					return true;
+				}
+				
+			} catch (NoSuchAlgorithmException e) {
+				// TODO Auto-generated catch block
+				throw new EncryptionException(e.getMessage());
+			}
+		}
+			
+		
+    	return false;
     }
  
 }

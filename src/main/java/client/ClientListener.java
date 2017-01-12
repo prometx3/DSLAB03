@@ -23,10 +23,7 @@ public class ClientListener extends Thread
         this.socket = socket;
     }
  
-    /**
-     * Until interrupted, reads messages from the client socket, forwards them
-     * to the server dispatcher's queue and notifies the server dispatcher.
-     */
+  
     public void run()
     {
 		//System.out.println("ClientListener is waiting for input!");

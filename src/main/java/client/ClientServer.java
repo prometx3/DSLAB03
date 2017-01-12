@@ -21,10 +21,7 @@ public class ClientServer extends Thread
         this.listener = new ArrayList<>();        
     }
  
-    /**
-     * Until interrupted, reads messages from the client socket, forwards them
-     * to the server dispatcher's queue and notifies the server dispatcher.
-     */
+   
     public void run()
     {
     	//System.out.println("ClientServerThread is running!");       
@@ -59,6 +56,11 @@ public class ClientServer extends Thread
 		}
 
 	
+    }
+    
+    public void close() throws IOException
+    {
+    	this.serverSocket.close();
     }
  
 }

@@ -1,5 +1,6 @@
 package chatserver;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
@@ -7,6 +8,8 @@ import java.net.DatagramSocket;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
+import java.security.PrivateKey;
+import java.security.Security;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -17,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 import cli.Command;
 import cli.Shell;
 import util.Config;
+import util.Keys;
 
 public class Chatserver implements IChatserverCli, Runnable {
 
@@ -37,6 +41,9 @@ public class Chatserver implements IChatserverCli, Runnable {
 	private boolean shutdown = false;
 	//threading
 	private ExecutorService executor;
+	
+	//encryption
+	private PrivateKey privateKey;
 
 	/**
 	 * @param componentName
@@ -81,9 +88,13 @@ public class Chatserver implements IChatserverCli, Runnable {
 		new Thread(shell).start();
 		System.out.println(getClass().getName()
 				+ " up and waiting for commands!");
-
-		// setting up server sockets and waiting for connections
+		
+		
+	
 		try {
+			// load private key for the server
+			privateKey = Keys.readPrivatePEM(new File(config.getString("key")));
+			// setting up server sockets and waiting for connections
 			serverSocket = new ServerSocket(config.getInt("tcp.port"));
 			serverUDPSocket = new DatagramSocket(config.getInt("udp.port"));
 			udpListener = new UDPListener(serverUDPSocket,dispatcher,shell);
@@ -109,7 +120,7 @@ public class Chatserver implements IChatserverCli, Runnable {
 					ClientInfo clientInfo = new ClientInfo();
 					clientInfo.mSocket = socket;
 					ClientListener clientListener = new ClientListener(
-							clientInfo, dispatcher);
+							clientInfo, dispatcher,privateKey,config);
 					ClientSender clientSender = new ClientSender(clientInfo,
 							dispatcher);
 					clientInfo.mClientListener = clientListener;
@@ -189,6 +200,14 @@ public class Chatserver implements IChatserverCli, Runnable {
 	public static void main(String[] args) {
 		Chatserver chatserver = new Chatserver(args[0],
 				new Config("chatserver"), System.in, System.out);
+		
+		String providerName = "BC";
+
+	    if (Security.getProvider(providerName) == null) {
+	      System.out.println(providerName + " provider not installed");
+	    } else {
+	      System.out.println(providerName + " is installed.");
+	    }
 		// TODO: start the chatserver
 		new Thread((Runnable) chatserver).start();
 	}
