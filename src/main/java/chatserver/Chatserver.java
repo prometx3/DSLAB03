@@ -1,5 +1,6 @@
 package chatserver;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
@@ -7,10 +8,15 @@ import java.net.DatagramSocket;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
+<<<<<<< HEAD
 import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
+=======
+import java.security.PrivateKey;
+import java.security.Security;
+>>>>>>> stage2_dev
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -22,6 +28,7 @@ import cli.Command;
 import cli.Shell;
 import nameserver.INameserverForChatserver;
 import util.Config;
+import util.Keys;
 
 public class Chatserver implements IChatserverCli, Runnable {
 
@@ -42,7 +49,13 @@ public class Chatserver implements IChatserverCli, Runnable {
 	private boolean shutdown = false;
 	// threading
 	private ExecutorService executor;
+
 	private INameserverForChatserver nameserver;
+
+	
+	//encryption
+	private PrivateKey privateKey;
+
 
 	/**
 	 * @param componentName
@@ -95,10 +108,15 @@ public class Chatserver implements IChatserverCli, Runnable {
 		Thread.currentThread().setName("chatserver");
 		// TODO
 		new Thread(shell).start();
+
 		this.userResponseStream.println(getClass().getName() + " up and waiting for commands!");
 
 		// setting up server sockets and waiting for connections
+
 		try {
+			// load private key for the server
+			privateKey = Keys.readPrivatePEM(new File(config.getString("key")));
+			// setting up server sockets and waiting for connections
 			serverSocket = new ServerSocket(config.getInt("tcp.port"));
 			serverUDPSocket = new DatagramSocket(config.getInt("udp.port"));
 			udpListener = new UDPListener(serverUDPSocket, dispatcher, shell);
@@ -112,33 +130,42 @@ public class Chatserver implements IChatserverCli, Runnable {
 	}
 
 	public void getConnections() throws IOException {
+		
+			while (!shutdown) {
+				if(Thread.currentThread().isInterrupted())
+				{
+					shell.writeLine("Thread interrupted!");
+					break;
+				}
+				try {
+					Socket socket = serverSocket.accept();
+					ClientInfo clientInfo = new ClientInfo();
+					clientInfo.mSocket = socket;
+					ClientListener clientListener = new ClientListener(
+							clientInfo, dispatcher, nameserver, privateKey,config);
+					ClientSender clientSender = new ClientSender(clientInfo,
+							dispatcher);
+					clientInfo.mClientListener = clientListener;
+					clientInfo.mClientSender = clientSender;
+					// clientListener.start();
+					executor.execute(clientListener);
+					dispatcher.addClient(clientInfo);
+				} 
+				catch(SocketException e)
+				{
+					//could be thrown because exit closes the socket
+					shell.writeLine(e.getMessage());
+					shutdown = true;
+					return;
+				}
+				catch (IOException ioe) {
+					shell.writeLine(ioe.getMessage());
+					shutdown = true;
+					serverSocket.close();
+					return;
+				}
+				
 
-		while (!shutdown) {
-			if (Thread.currentThread().isInterrupted()) {
-				shell.writeLine("Thread interrupted!");
-				break;
-			}
-			try {
-				Socket socket = serverSocket.accept();
-				ClientInfo clientInfo = new ClientInfo();
-				clientInfo.mSocket = socket;
-				ClientListener clientListener = new ClientListener(clientInfo, dispatcher, nameserver);
-				ClientSender clientSender = new ClientSender(clientInfo, dispatcher);
-				clientInfo.mClientListener = clientListener;
-				clientInfo.mClientSender = clientSender;
-				// clientListener.start();
-				executor.execute(clientListener);
-				dispatcher.addClient(clientInfo);
-			} catch (SocketException e) {
-				// could be thrown because exit closes the socket
-				shell.writeLine(e.getMessage());
-				shutdown = true;
-				return;
-			} catch (IOException ioe) {
-				shell.writeLine(ioe.getMessage());
-				shutdown = true;
-				serverSocket.close();
-				return;
 			}
 
 		}
@@ -192,7 +219,18 @@ public class Chatserver implements IChatserverCli, Runnable {
 	 *            component
 	 */
 	public static void main(String[] args) {
-		Chatserver chatserver = new Chatserver(args[0], new Config("chatserver"), System.in, System.out);
+
+		Chatserver chatserver = new Chatserver(args[0],
+				new Config("chatserver"), System.in, System.out);
+		
+		String providerName = "BC";
+
+	    if (Security.getProvider(providerName) == null) {
+	      System.out.println(providerName + " provider not installed");
+	    } else {
+	      System.out.println(providerName + " is installed.");
+	    }
+
 		// TODO: start the chatserver
 		new Thread((Runnable) chatserver).start();
 	}

@@ -1,6 +1,7 @@
 package client;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
@@ -9,11 +10,21 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.nio.charset.Charset;
+import java.security.PublicKey;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executors;
 
+import javax.crypto.BadPaddingException;
+import javax.crypto.IllegalBlockSizeException;
+
+import security.Base64Channel;
+import security.BasicTCPChannel;
+import security.EncryptionException;
+import security.SecureChannel;
+import util.Keys;
 import cli.Shell;
 
 public class ClientCommunication extends Thread {
@@ -24,22 +35,29 @@ public class ClientCommunication extends Thread {
 	private BufferedReader in;		
 	private PrintWriter out;		
 	
-
+	private SecureChannel secureChannel;
 	
 	private String lastPubMsg;
+	
 	public ClientCommunication(Socket sock, DatagramSocket udpSock, Client client) throws IOException {
 		this.sock = sock;
 		this.udpSocket = udpSock;
 		this.client = client;
 		
-		in = new BufferedReader(new InputStreamReader(sock.getInputStream()));
-		out = new PrintWriter(sock.getOutputStream(), true);
+		//in = new BufferedReader(new InputStreamReader(sock.getInputStream()));
+		//out = new PrintWriter(sock.getOutputStream(), true);
 		
 		lastPubMsg = "";
 	}
 
-	public void send(String msg) {
-		this.out.println(msg);
+	public void send(String msg) throws EncryptionException {
+		if(secureChannel == null)
+		{
+			throw new EncryptionException("SecureChannel not set!");
+		}
+	
+		//send with secure channel
+		this.secureChannel.sendMessage(msg.getBytes(Charset.forName("UTF-8")));		
 	}
 	public String receiveMessage() throws IOException
 	{
@@ -66,45 +84,40 @@ public class ClientCommunication extends Thread {
 				{
 					break;
 				}
-				clients.add(answer);
-				
+				clients.add(answer);				
 			}
 			return clients;
 	}
 	public void run() {
 		Thread.currentThread().setName("main");
+		if(secureChannel == null)
+		{
+			client.writeLine("SecureChannel not set!");
+			return;
+		}
 		// Get lines from server; print to console
 		try {
 			String line;
-			while ((line = in.readLine()) != null && !Thread.currentThread().isInterrupted()) {				
+			while ((line = this.secureChannel.receiveMessage()) != null && !Thread.currentThread().isInterrupted()) {				
 				if (line.equals("close")) {
-					this.close();
+					//this.close();
 					client.exit();
 					return;
 				}
-				parseMessage(line);
-				//client.onReceiveMessage(line);
+				parseMessage(line);				
 			}
 		}
 		catch (IOException e) {		
 			client.writeLine(e.getMessage() + ": Cleaning ClientCommunication up!");				
+		} catch (EncryptionException e) {
+			// TODO Auto-generated catch block
+			client.writeLine(e.getMessage() + ": Cleaning ClientCommunication up!");	
 		}
 		// Clean up
 		try {
-			client.writeLine("Cleaning ClientCommunication up!");
-			out.close();
-			if(!this.sock.isClosed())
-			{
-				this.sock.close();
-			}
-			if(!this.udpSocket.isClosed())
-			{
-				this.udpSocket.close();
-			}
-			//in.close();
-			//client.exit();
+			this.close();
 		}
-		catch (IOException e) {
+		catch (Exception e) {
 			client.writeLine(e.getMessage());
 		}
 	}	
@@ -145,10 +158,16 @@ public class ClientCommunication extends Thread {
 		return this.lastPubMsg;
 	}
 	
-	public void close() throws IOException {
+	public void setSecureChannel(SecureChannel secChannel)
+	{
+		this.secureChannel = secChannel;
+	}
+	
+	public void close() throws IOException, NullPointerException, EncryptionException {
 		Thread.currentThread().interrupt();
+		
 		//this.in.close();
-		this.out.close();
+		//this.out.close();
 		if(!this.sock.isClosed())
 		{
 			this.sock.close();

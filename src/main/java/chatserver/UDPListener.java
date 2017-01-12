@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import cli.Shell;
 
@@ -71,6 +72,14 @@ public class UDPListener extends Thread {
 	public void close()
 	{
 		Thread.currentThread().interrupt();
+		executor.shutdown();
+		try {
+		    if (!executor.awaitTermination(800, TimeUnit.MILLISECONDS)) {
+		    	executor.shutdownNow();
+		    } 
+		} catch (InterruptedException e) {
+			executor.shutdownNow();
+		}
 		this.serverSocket.close();
 	}
 	

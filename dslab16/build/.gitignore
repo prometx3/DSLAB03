@@ -1,0 +1,14 @@
+/chatserver/
+/chatserver.properties
+/cli/
+/client/
+/client.properties
+/nameserver/
+/ns-at.properties
+/ns-de.properties
+/ns-root.properties
+/ns-vienna-at.properties
+/scenario/
+/test/
+/user.properties
+/util/

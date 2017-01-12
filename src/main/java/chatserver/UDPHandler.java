@@ -32,11 +32,7 @@ public class UDPHandler implements Runnable {
 		if (clients != null) {
 			InetAddress IPAddress = pack.getAddress();
 			int port = pack.getPort();
-			/*
-			 * try { Thread.currentThread(); Thread.sleep(10000); } catch
-			 * (InterruptedException e) { // TODO Auto-generated catch block
-			 * e.printStackTrace(); }
-			 */
+			
 			try {
 				Collections.sort(clients);
 				for (String name : clients) {
@@ -46,7 +42,7 @@ public class UDPHandler implements Runnable {
 				sendAnswer("end", IPAddress, port);
 			} catch (IOException e) {
 				// TODO Auto-generated catch block
-				e.printStackTrace();
+				System.out.println(e.getMessage());
 			}
 		}
 	}

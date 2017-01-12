@@ -1,6 +1,7 @@
 package client;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -11,12 +12,30 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.nio.charset.Charset;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 
+import javax.crypto.BadPaddingException;
+import javax.crypto.IllegalBlockSizeException;
+import javax.crypto.NoSuchPaddingException;
+
+import security.AESChannel;
+import security.Base64Channel;
+import security.BasicTCPChannel;
+import security.EncryptionException;
+import security.RSAChannel;
+import security.SecureChannel;
 import util.Config;
+import util.Keys;
 import cli.Command;
 import cli.Shell;
 import nameserver.INameserverCli;
@@ -32,7 +51,7 @@ public class Client implements IClientCli, Runnable, INameserverCli {
 	private String userName;
 	private Socket socket;
 	private DatagramSocket udpSocket;
-	
+	private boolean loggedIn = false; 
 	private String lastMsg;
 	
 	//client server for accepting private tcp messages if registered ip
@@ -85,9 +104,11 @@ public class Client implements IClientCli, Runnable, INameserverCli {
 			socket = new Socket(config.getString("chatserver.host"),
 					config.getInt("chatserver.tcp.port"));
 			udpSocket = new DatagramSocket();
+			
+			
 			clientCommunicator = new ClientCommunication(socket, udpSocket,
 					this);
-			clientCommunicator.start();
+			//clientCommunicator.start();
 			
 			
 			this.userResponseStream.println(getClass().getName()
@@ -102,12 +123,16 @@ public class Client implements IClientCli, Runnable, INameserverCli {
 		}
 		
 	}
-
+	
+	/**
+	 * not needed anymore
+	 */
 	@Override
 	@Command
 	public String login(String username, String password) throws IOException {
-		clientCommunicator.send("!login " + username + " " + password);
-		try {
+		
+		/*try {
+			clientCommunicator.send("!login " + username + " " + password);
 			String response = responsesQueue.take();
 			String checkedResp = checkResponse("!login","!!login",response);
 			if(checkedResp != null)
@@ -118,36 +143,69 @@ public class Client implements IClientCli, Runnable, INameserverCli {
 			shell.writeLine(e.getMessage());
 		} catch (IllegalResponseException e) {
 			shell.writeLine(e.getMessage());
+		} catch(Exception e)
+		{
+			shell.writeLine(e.getMessage());
 		}
 		//writeLine(clientCommunicator.receiveMessage());
-		//writeLine(in.readLine());
+		//writeLine(in.readLine());*/
 		return null;
 	}
 
 	@Override
 	@Command
 	public String logout() throws IOException {
-		clientCommunicator.send("!logout");
+		if(loggedIn == false)
+		{
+			shell.writeLine("Not logged in!");
+			return null;
+		}
 		try {
+			clientCommunicator.send("!logout");
 			String response = responsesQueue.take();
-			checkResponse("!logout","!!logout",response);			
-		} catch (InterruptedException e) {		
-			shell.writeLine(e.getMessage());
-		} catch (IllegalResponseException e) {
+			if(checkResponse("!logout", "!!logout", response) != null)
+			{
+				//logout successful
+				this.loggedIn = false;
+				this.userName = "";
+			}
+		} catch (Exception e) {
 			shell.writeLine(e.getMessage());
 		}
 		//also end client listener
 		if(clientServer != null)
 		{
 			clientServer.interrupt();
+			try
+			{
+				clientServer.close();
+			}
+			catch(Exception e)
+			{
+				
+			}
 		}
+		try {
+			clientCommunicator.close();
+		} catch (Exception e) {
+			shell.writeLine(e.getMessage());
+		} 
 		return null;
 	}
 
 	@Override
 	@Command
 	public String send(String message) throws IOException {
-		clientCommunicator.send("!send " + message);
+		if(loggedIn == false)
+		{
+			shell.writeLine("Not logged in!");
+			return null;
+		}
+		try {
+			clientCommunicator.send("!send " + message);
+		} catch (EncryptionException e) {			
+			shell.writeLine(e.getMessage());
+		}
 		return null;
 	}
 
@@ -191,8 +249,13 @@ public class Client implements IClientCli, Runnable, INameserverCli {
 	}
 	private String lookAddressUp(String username) throws IOException
 	{
-		clientCommunicator.send("!lookup " + username);
+		if(loggedIn == false)
+		{
+			shell.writeLine("Not logged in!");
+			return null;
+		}
 		try {
+			clientCommunicator.send("!lookup " + username);
 			String response = responsesQueue.take();
 			String checkedResp = checkResponse("!lookup","!!lookup",response);
 			if(checkedResp != null)
@@ -203,14 +266,18 @@ public class Client implements IClientCli, Runnable, INameserverCli {
 			shell.writeLine(e.getMessage());
 		} catch (IllegalResponseException e) {
 			shell.writeLine(e.getMessage());
+		} catch (Exception e)
+		{
+			shell.writeLine(e.getMessage());
 		}
+		
 		return null;
 	}
 	@Override
 	@Command
 	public String register(String privateAddress) throws IOException {		
 		//check if username is set -> only set if already logged in
-		if(this.userName.equals(""))
+		if(loggedIn == false || this.userName == null || this.userName.equals(""))
 		{
 			shell.writeLine("Not logged in!");
 			return null;
@@ -222,16 +289,11 @@ public class Client implements IClientCli, Runnable, INameserverCli {
 			String port = split[1];
 			try
 			{
-				clientServer = new ClientServer(Integer.valueOf(port),this);
-			}
-			catch(Exception e)
-			{
-				shell.writeLine(e.getMessage());
-				return null;
-			}
-			clientServer.start();
-			clientCommunicator.send("!register " + privateAddress);
-			try {
+				clientServer = new ClientServer(Integer.valueOf(port),this);			
+			
+				clientServer.start();
+				clientCommunicator.send("!register " + privateAddress);
+			
 				String response = responsesQueue.take();
 				checkResponse("!register","!!register",response);
 				
@@ -239,6 +301,9 @@ public class Client implements IClientCli, Runnable, INameserverCli {
 				shell.writeLine(e.getMessage());
 			} catch (IllegalResponseException e) {
 				shell.writeLine(e.getMessage());
+			} catch(Exception e) {
+				shell.writeLine(e.getMessage());
+				return null;
 			}
 		}		
 		else
@@ -266,15 +331,17 @@ public class Client implements IClientCli, Runnable, INameserverCli {
 		
 		shell.writeLine("Exiting client!");		
 		//closes sockets 
-		clientCommunicator.close();
-				
-		
-		//socket.close();
-		//udpSocket.close();
+		try {
+			clientCommunicator.close();
+		} catch (NullPointerException | EncryptionException e) {
+			// TODO Auto-generated catch block
+			shell.writeLine(e.getMessage());
+		}		
 		
 		if(clientServer != null)
 		{
 			clientServer.interrupt();
+			clientServer.close();
 		}
 		shell.writeLine("Client closed, please exit shell!");
 		shell.close();		
@@ -385,10 +452,69 @@ public class Client implements IClientCli, Runnable, INameserverCli {
 	
 	// --- Commands needed for Lab 2. Please note that you do not have to
 	// implement them for the first submission. ---
-
+	
 	@Override
+	@Command
 	public String authenticate(String username) throws IOException {
-		// TODO Auto-generated method stub
+		PrivateKey pk = Keys.readPrivatePEM(new File(config.getString("keys.dir") + "/" + username + ".pem"));
+		PublicKey pubKey = Keys.readPublicPEM(new File(config.getString("chatserver.key")));
+		
+			
+		if(pk != null)
+		{
+			// generates a 32 byte secure random number
+			SecureRandom secureRandom = new SecureRandom();
+			final byte[] number = new byte[32];
+			secureRandom.nextBytes(number);
+		
+			String secureRndBase64 = Base64Channel.encodeBase64(number);
+			SecureChannel secChannel;
+			try {
+				//first use the RSAChannel to do the handshake
+				secChannel = new RSAChannel(new Base64Channel(new BasicTCPChannel(socket)),pubKey,pk);
+				
+				//send the first message to the server, including the client secret(random number)
+				String msg = "!authenticate " + username + " " + secureRndBase64;				
+				secChannel.sendMessage(msg.getBytes(Charset.forName("UTF-8")));
+				
+				//wait for the response
+				String response = secChannel.receiveMessage();;
+				//check if reponse is correct
+				String[] split = response.split("\\s");
+				if(split.length > 1)
+				{
+					if (split[0].equals("!ok")) {
+						// server sent ok response
+						// check if the client secret is correct
+						if (secureRndBase64.equals(split[1])) {
+							// everything worked -> initialize with AES
+							secChannel = new AESChannel(new Base64Channel(
+									new BasicTCPChannel(socket)), split[3],
+									split[4]);
+							shell.writeLine("AES Secure Channel established!");
+							this.clientCommunicator
+									.setSecureChannel(secChannel);
+							this.clientCommunicator.start();
+
+							this.userName = username;
+							this.loggedIn = true;
+							// send back the server challenge to let the server
+							// know we decrypted correctly
+							this.clientCommunicator.send(split[2]);
+						}
+					}
+				}
+				else
+				{
+					//something went wrong, did not get the ok from server
+					shell.writeLine(response);
+				}
+				
+			} catch (Exception e) {
+				shell.writeLine(e.getMessage());
+			}			
+			
+		}
 		return null;
 	}
 
